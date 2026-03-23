@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JJK 3D - Gojo Mobile</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Kaiti', 'Songti', serif; }
+        canvas { display: block; }
+
+        /* UI Controls */
+        #joystick-wrapper {
+            position: absolute;
+            bottom: 50px;
+            left: 50px;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            touch-action: none;
+        }
+        #joystick-knob {
+            position: absolute;
+            top: 35px;
+            left: 35px;
+            width: 50px;
+            height: 50px;
+            background: #fff;
+            border-radius: 50%;
+        }
+        #jump-button {
+            position: absolute;
+            bottom: 70px;
+            right: 50px;
+            width: 80px;
+            height: 80px;
+            background: rgba(0, 150, 255, 0.6);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="joystick-wrapper"><div id="joystick-knob"></div></div>
+    <div id="jump-button">JUMP</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        let scene, camera, renderer, model, mixer, clock;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let velocity = new THREE.Vector3();
+        let isJumping = false;
+        let vY = 0; // Vertical velocity
+
+        init();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xa0a0a0);
+            scene.fog = new THREE.Fog(0xa0a0a0, 10, 50);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 2, 5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+            light.position.set(0, 20, 0);
+            scene.add(light);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff);
+            dirLight.position.set(3, 10, 10);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // Floor
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false }));
+            mesh.rotation.x = - Math.PI / 2;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            clock = new THREE.Clock();
+
+            // Load Gojo Model
+            const loader = new GLTFLoader();
+            loader.load('gojo.glb', (gltf) => {
+                model = gltf.scene;
+                model.scale.set(1, 1, 1);
+                model.traverse(n => { if (n.isMesh) n.castShadow = true; });
+                scene.add(model);
+
+                mixer = new THREE.AnimationMixer(model);
+                // Note: If the model has animations named "Walk" or "Run", we play them here
+                if (gltf.animations.length > 0) {
+                    const action = mixer.clipAction(gltf.animations[0]); // Default first animation
+                    action.play();
+                }
+            });
+
+            animate();
+        }
+
+        // Joystick Logic
+        const knob = document.getElementById('joystick-knob');
+        const wrapper = document.getElementById('joystick-wrapper');
+        
+        wrapper.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            const rect = wrapper.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 50);
+            const angle = Math.atan2(dy, dx);
+
+            knob.style.transform = `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px)`;
+            
+            moveForward = dy < -20;
+            moveBackward = dy > 20;
+            moveLeft = dx < -20;
+            moveRight = dx > 20;
+        });
+
+        wrapper.addEventListener('touchend', () => {
+            knob.style.transform = `translate(0px, 0px)`;
+            moveForward = moveBackward = moveLeft = moveRight = false;
+        });
+
+        // Jump Logic
+        document.getElementById('jump-button').addEventListener('touchstart', () => {
+            if (!isJumping) {
+                vY = 0.15;
+                isJumping = true;
+            }
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta);
+
+            if (model) {
+                // Movement
+                if (moveForward) model.position.z -= 0.1;
+                if (moveBackward) model.position.z += 0.1;
+                if (moveLeft) model.position.x -= 0.1;
+                if (moveRight) model.position.x += 0.1;
+
+                // Rotation (Face the movement direction)
+                if (moveForward || moveBackward || moveLeft || moveRight) {
+                    model.rotation.y = Math.atan2( (moveLeft ? 1 : 0) - (moveRight ? 1 : 0), (moveForward ? 1 : 0) - (moveBackward ? 1 : 0));
+                }
+
+                // Gravity/Jump
+                model.position.y += vY;
+                if (isJumping) {
+                    vY -= 0.008; // Gravity
+                    if (model.position.y <= 0) {
+                        model.position.y = 0;
+                        isJumping = false;
+                        vY = 0;
+                    }
+                }
+
+                // Camera follow
+                camera.position.lerp(new THREE.Vector3(model.position.x, model.position.y + 2, model.position.z + 5), 0.1);
+                camera.lookAt(model.position);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
